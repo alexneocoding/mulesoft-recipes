@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<amqp:config name="AMQP_Config" doc:name="AMQP Config" doc:id="ceb654d7-3bc0-4b85-9461-dccf6feec3e0" >
+		<amqp:connection host="shrimp-01.rmq.cloudamqp.com" port="5672" virtualHost="ziqwjwnj" username="ziqwjwnj" password="FXUZQamyXPEJRDu-DC5TusC1-EAyU6z3" />
+		<amqp:consumer-config ackMode="MANUAL" numberOfConsumers="1"/>
+	</amqp:config>
+	<http:listener-config name="HTTP_Listener_config-tickets" doc:name="HTTP Listener config" doc:id="b6b5bac6-993b-4ef8-b3c9-322c67164277" basePath="/tickets">
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+</mule>

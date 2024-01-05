@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<flow name="ticket-purchase-flow" doc:id="63d64830-9a3f-48aa-8fd3-65fa3814f0bd">
+		<http:listener doc:name="POST /tickets/purchase" doc:id="f0b0fbbf-7222-4afa-9f4e-168e33b505bf" config-ref="HTTP_Listener_config-tickets" path="/purchase" allowedMethods="POST">
+			<http:response statusCode="202" />
+			<http:error-response statusCode="#[payload.errorCode]" >
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<until-successful maxRetries="3" doc:name="Until Successful" doc:id="269e72e5-5bb3-43fc-8970-0425c4f37fd2" millisBetweenRetries="3000">
+			<try doc:name="Try" doc:id="57843409-f01c-4a8e-a9c8-6a6146bb2aa0" transactionalAction="ALWAYS_BEGIN">
+			<ee:transform doc:name="&gt; message" doc:id="6c9fca9d-8766-40f0-b517-6a831dee98a2">
+			<ee:message>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="message"><![CDATA[output application/json
+
+---
+payload ++ {"id" : uuid()}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+			<amqp:publish doc:name="Tickets.Purchase" doc:id="823fca54-9b62-4b1d-aebc-a6bfa2f70634" config-ref="AMQP_Config" exchangeName="EXCHANGE.TICKETS" deliveryMode="PERSISTENT" sendCorrelationId="ALWAYS" transactionalAction="ALWAYS_JOIN">
+			<amqp:message>
+				<amqp:body><![CDATA[#[vars.message]]]></amqp:body>
+			</amqp:message>
+		</amqp:publish>
+			<set-payload value='#[output application/json&#10;---&#10;{&#10;	"status" : "success",&#10;	"statusDescription" : "Message sent successfully.",&#10;	"data" : vars.message&#10;}]' doc:name="Set Payload" doc:id="86fa3954-def4-4b97-98cb-952eba713c45" />
+			<logger level="INFO" doc:name="Log Message Sent" doc:id="685bedfa-aec1-4c94-b016-3efffefdb0dc" message="#[payload]" />
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="7bab6ed1-3a43-4818-a507-8af9956ab703">
+					<set-payload value='#[output application/json&#10;---&#10;{&#10;    "message": error.description default "Unexpected error",&#10;    "errorCode": "500",&#10;    "errorDetails" : error.detailedDescription default "",&#10;	"data" : vars.message default "",&#10;}]' doc:name="Set Payload" doc:id="b5bf12a8-589d-47bd-86a7-fc35840a5f5c" />
+					<logger level="INFO" doc:name="Log Message Sent" doc:id="ec07ff8e-4256-490a-b41a-1514ae077fac" message='#[output application/json&#10;---&#10;{&#10;	"status" : "error",&#10;	"statusDescription" : "An error occurred and the message was not sent.",&#10;	"data" : vars.message default ""&#10;}]' />
+				</on-error-continue>
+			</error-handler>
+		</try>
+		</until-successful>
+	</flow>
+	<flow name="ticket-processing-flow" doc:id="acb0b31b-3b9b-4065-bfc6-4ce23ff22bc3">
+		<http:listener doc:name="POST /tickets/process" doc:id="7ef3e834-ddc5-4726-a80d-0de658baad27" config-ref="HTTP_Listener_config-tickets" path="/process" >
+			<http:error-response statusCode="#[payload.errorCode]">
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<try doc:name="Try" doc:id="316dc45e-582a-41ce-b4e2-c31abc93d8a6">
+			<amqp:consume doc:name="Consume" doc:id="7cbe8f7d-2edb-43b2-b8c5-9e90c83238c1" config-ref="AMQP_Config" queueName="TICKET.PURCHASE" ackMode="MANUAL" />
+			<set-variable value='#[output application/json&#10;---&#10;payload ++ {"ackId" : attributes.ackId}]' doc:name="message" doc:id="ebfeaad7-6dd7-438b-9223-677ad5491db3" variableName="message" />
+			<logger level="INFO" doc:name="Log Message Received" doc:id="66a94b19-f802-4065-9bc5-14a0c01733e1" message='#[output application/json&#10;---&#10;{&#10;	"status" : "success",&#10;	"statusDescription" : "Message received",&#10;	"data" : vars.message&#10;}]' />
+			<flow-ref doc:name="validate-message-subflow" doc:id="88223f35-33d4-4594-9626-1c2cd602d68d" name="validate-message-subflow" />
+			<logger level="INFO" doc:name="Seat Reservation Simulation" doc:id="996376e6-863f-410d-8a09-645e1a96b37c" message='#["Seat Reservation...Completed"]' />
+			<logger level="INFO" doc:name="Send e-mail Purchase Completed (simulation)" doc:id="12f2b4f9-7c84-49b1-9a9c-757fcd266f9b" message='#["Send e-mail Purchase Completed (simulation)"]' />
+			<set-payload value='#[output application/json&#10;---&#10;{&#10;	"status" : "success",&#10;	"statusDescription" : "Ticket Purchase completed successfully!",&#10;	"data" : vars.message&#10;}]' doc:name="Set Payload" doc:id="2d707d14-d61b-4caf-9b7f-8fe60be4bf67" />
+			<logger level="INFO" doc:name="payload" doc:id="843db7ee-c504-4221-b4eb-be53ec4e0d3d" message="#[payload]" />
+			<amqp:ack doc:name="Ack" doc:id="e83468a8-25f4-4825-90c8-207cf72e756e" ackId="#[attributes.ackId]" />
+			<error-handler>
+				<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="73f58870-c07a-4b06-aa50-f4ecc75f05cc" type="APP_ERROR:QUANTITY_NOT_ALLOWED">
+					<amqp:reject doc:name="Reject" doc:id="f22c63f6-4252-4341-accc-586b64c9a65a" ackId="#[vars.message.ackId]" />
+					<set-payload value='#[output application/json&#10;---&#10;{&#10;    "message": "Bad Request",&#10;    "errorCode": "400",&#10;    "errorDetails" : "ERROR: Quantity cannot be more than 5. This message was moved to the DLQ.",&#10;	"data" : vars.message default "",&#10;}]' doc:name="Set Payload" doc:id="1daf118f-351d-4885-9f87-0d8487d1ec62" />
+					<logger level="INFO" doc:name="" doc:id="e0486c85-ddcd-438f-a1cc-1fdf83ec43a8" message="#[payload]" />
+				</on-error-propagate>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="ed4143a3-d4c4-47ef-8d7b-26822cd08f88" type="ANY">
+						<choice doc:name="Choice" doc:id="c9b84651-4dd8-4d4c-813c-b0303b06a618" >
+						<when expression="#[vars.message.ackId != null]">
+							<amqp:reject doc:name="Reject" doc:id="0f1168cb-129e-4ed4-a910-7609f5f57840" ackId="#[vars.message.ackId]" />
+						</when>
+					</choice>
+					<set-payload value='#[output application/json&#10;---&#10;{&#10;    "message": error.description default "Unexpected error",&#10;    "errorCode": "500",&#10;    "errorDetails" : error.detailedDescription default "",&#10;	"data" : vars.message default "",&#10;}]' doc:name="Set Payload" doc:id="d380f98f-0c4f-417e-97a5-290bfb799d14" />
+						<logger level="INFO" doc:name="" doc:id="c3956178-fa5b-4f2f-b819-137847cb1025" message="#[payload]" />
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</flow>
+	<sub-flow name="validate-message-subflow" doc:id="2cab89d8-a403-4f78-b5d1-ab5596117c38" >
+		<choice doc:name="Choice" doc:id="92b17d44-4542-4993-bf8d-9cc3b93acaf7" >
+			<when expression="#[vars.message != null]">
+				<choice doc:name="Quantitiy &gt; 5" doc:id="4627efe8-ffd5-419c-8b3e-cb328ad1b729">
+			<when expression="#[vars.message.quantity &gt; 5]">
+						<raise-error doc:name="ERROR:QUANTITY_NOT_ALLOWED" doc:id="3bfe740f-45ec-418d-ac3e-2dcc1d2b6bef" type="APP_ERROR:QUANTITY_NOT_ALLOWED" />
+			</when>
+					<otherwise >
+						<logger level="INFO" doc:name="Logger" doc:id="f09da30f-ac31-4434-98b5-d979fb1a9cf5" message='#["Message is valid..."]' />
+					</otherwise>
+		</choice>
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="c3304904-6566-4469-993f-cea9045ca135" message='#["The queue is empty..."]'/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+	<flow name="dlq-handler-flow" doc:id="227dbf53-5daf-4ba1-82b5-23a5a8d044f9" >
+		<amqp:listener doc:name="Listener" doc:id="19b6a3a1-ab69-42ed-8580-43a62718c30f" config-ref="AMQP_Config" queueName="TICKET.PURCHASE.DLQ" numberOfConsumers="1" ackMode="AUTO"/>
+		<until-successful maxRetries="5" doc:name="Until Successful" doc:id="32ea75bd-010f-47ac-b52a-50577a035c4e" >
+			<try doc:name="Try" doc:id="633001e8-2960-4177-a6c5-2a5ca88244c2" transactionalAction="ALWAYS_BEGIN">
+			<set-variable value='#[output application/json&#10;---&#10;payload ++ {"ackId" : attributes.ackId}]' doc:name="message" doc:id="ef82aa5e-b254-460e-b3bc-f8defcca40e2" variableName="message" />
+			<set-payload value='#[output application/json&#10;---&#10;{&#10;    "message": "DLQ Message sent to a Process API (simulation)",&#10;   	"data" : vars.message default "",&#10;} as Object {class: "org.mule.runtime.api.message.MultiPartPayload"}]' doc:name="Set Payload" doc:id="cc220330-aa6c-43df-a2dd-186c03a9fe3c" />
+			<logger level="INFO" doc:name="Send the DQL Message to a Process API (simulation)" doc:id="885f2bd1-ce6e-40fb-be0a-76d820ccebad" message="#[payload]" />
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="af7e3efa-1773-48e2-81e6-74bf529d98e5">
+						<logger level="INFO" doc:name="Logger" doc:id="9f4327fb-e911-42cb-8bb4-ff0f5996f826" message='#["DLQ Message could not be retrivied this time."]'/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+		</until-successful>
+	</flow>
+</mule>
